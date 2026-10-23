@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Data Uploader</title>
+  <title>Fast Sheets Sync</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     body { background: #f1f5f9; }
@@ -23,8 +24,8 @@
     .bar-fill {
       background: linear-gradient(90deg, #2563eb 0%, #60a5fa 50%, #2563eb 100%);
       background-size: 200% 100%;
-      animation: shimmer 1.5s infinite linear;
-      transition: width 0.25s ease;
+      animation: shimmer 1.2s infinite linear;
+      transition: width 0.2s ease-out;
     }
   </style>
 </head>
@@ -37,7 +38,8 @@
       <svg class="w-10 h-10 text-slate-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
       </svg>
-      <p class="text-sm font-medium text-slate-600">Click or drop CSV / XLSX</p>
+      <p class="text-sm font-semibold text-slate-700">Click or drop CSV / XLSX</p>
+      <p class="text-xs text-slate-400 mt-1">Direct Sheets API v4 • Web Worker Accelerated</p>
     </div>
 
     <div id="processingState" class="hidden flex-col bg-slate-50 border border-slate-200 rounded-xl p-5">
@@ -77,7 +79,7 @@
   </div>
 
   <script>
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwmXT5gZFS2LYUw2Q-vAgGE_4cPR8BKYwIcRYeTLPZ37HRC6FWB08mkwRpdTKBT0CaM6w/exec";
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzu1TFnZoMDIJo-f2pbNHnGY1DkF8EBuj6tx3dO4ulZSD2GJf-8Otgx3cw0Wgonueve/exec";
 
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
@@ -93,6 +95,7 @@
     const etaText = document.getElementById('etaText');
 
     let abortController = null;
+    let activeWorker = null;
     let isCancelled = false;
 
     dropZone.addEventListener('click', () => fileInput.click());
@@ -107,8 +110,6 @@
       if (e.target.files.length) handleFile(e.target.files[0]);
     });
 
-    const nextFrame = () => new Promise(res => requestAnimationFrame(() => setTimeout(res, 15)));
-
     function setProgress(percent, text) {
       const p = Math.min(100, Math.max(0, Math.round(percent)));
       progressBar.style.width = `${p}%`;
@@ -119,22 +120,79 @@
     function cancelUpload() {
       isCancelled = true;
       if (abortController) abortController.abort();
+      if (activeWorker) activeWorker.terminate();
       showError("Cancelled");
     }
 
-    function normalizeSlice(rawMatrix, startIdx, endIdx, maxCols) {
-      const sliceLen = endIdx - startIdx;
-      const chunk = new Array(sliceLen);
-      for (let i = 0; i < sliceLen; i++) {
-        const row = rawMatrix[startIdx + i] || [];
-        const clean = new Array(maxCols);
-        for (let c = 0; c < maxCols; c++) {
-          const val = row[c];
-          clean[c] = (val === null || val === undefined) ? "" : String(val);
-        }
-        chunk[i] = clean;
+    function colToLetter(col) {
+      let s = '';
+      while (col > 0) {
+        let m = (col - 1) % 26;
+        s = String.fromCharCode(65 + m) + s;
+        col = Math.floor((col - m) / 26);
       }
-      return chunk;
+      return s || 'A';
+    }
+
+    function parseFileInWorker(file, ext) {
+      if (ext === '.csv') {
+        return new Promise((resolve, reject) => {
+          Papa.parse(file, {
+            worker: true,
+            skipEmptyLines: true,
+            complete: (results) => resolve(results.data),
+            error: (err) => reject(err)
+          });
+        });
+      }
+
+      return new Promise((resolve, reject) => {
+        const workerCode = `
+          importScripts('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+          self.onmessage = function(e) {
+            try {
+              const wb = XLSX.read(new Uint8Array(e.data), { type: 'array', dense: true });
+              const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+              self.postMessage({ ok: true, rows: rows });
+            } catch (err) {
+              self.postMessage({ ok: false, error: err.message });
+            }
+          };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        activeWorker = new Worker(URL.createObjectURL(blob));
+        activeWorker.onmessage = (e) => {
+          activeWorker.terminate();
+          activeWorker = null;
+          e.data.ok ? resolve(e.data.rows) : reject(new Error(e.data.error));
+        };
+        file.arrayBuffer().then(buf => activeWorker.postMessage(buf, [buf])).catch(reject);
+      });
+    }
+
+    function initSession() {
+      if (window.google && google.script && google.script.run) {
+        return new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(res => res && res.success ? resolve(res) : reject(new Error(res ? res.message : "Init failed")))
+            .withFailureHandler(err => reject(new Error(err.message)))
+            .initSheetSession();
+        });
+      }
+
+      return fetch(WEB_APP_URL, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: '{}'
+      }).then(async res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
+        return data;
+      }).catch(err => {
+        throw new Error(`Handshake failed (${err.message}). Set Web App access to 'Anyone' or open via your Apps Script /exec link.`);
+      });
     }
 
     async function handleFile(file) {
@@ -157,15 +215,12 @@
       const startTime = performance.now();
 
       try {
-        setProgress(5, "Reading file...");
-        const buffer = await file.arrayBuffer();
+        setProgress(4, "Parsing in background worker & authenticating...");
+        const [rawMatrix, session] = await Promise.all([
+          parseFileInWorker(file, ext),
+          initSession()
+        ]);
         if (isCancelled) return;
-
-        setProgress(10, "Parsing spreadsheet...");
-        await nextFrame();
-
-        const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array', dense: true });
-        const rawMatrix = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
 
         const totalRows = rawMatrix.length;
         if (!totalRows) throw new Error("Empty file.");
@@ -177,10 +232,11 @@
 
         const totalCells = totalRows * maxCols;
         if (totalCells > 10000000) {
-          throw new Error(`File has ${totalCells.toLocaleString()} cells (${totalRows.toLocaleString()} rows × ${maxCols} cols). Google Sheets max limit is 10,000,000 cells.`);
+          throw new Error(`File has ${totalCells.toLocaleString()} cells. Google Sheets limit is 10,000,000 cells.`);
         }
 
-        const chunkSize = Math.max(500, Math.min(5000, Math.floor(45000 / maxCols)));
+        const endCol = colToLetter(maxCols);
+        const chunkSize = Math.max(2000, Math.min(35000, Math.floor(250000 / maxCols)));
         const totalChunks = Math.ceil(totalRows / chunkSize);
         const syncStart = performance.now();
 
@@ -189,25 +245,31 @@
 
           const startIdx = i * chunkSize;
           const endIdx = Math.min(startIdx + chunkSize, totalRows);
+          const startRow = startIdx + 1;
           const batchNum = i + 1;
 
-          batchCounterText.innerText = `Part ${batchNum}/${totalChunks}`;
-          setProgress(12 + ((i / totalChunks) * 88), `${(startIdx + 1).toLocaleString()} – ${endIdx.toLocaleString()} of ${totalRows.toLocaleString()}`);
+          batchCounterText.innerText = `Batch ${batchNum}/${totalChunks}`;
+          setProgress(10 + ((i / totalChunks) * 90), `${startRow.toLocaleString()} – ${endIdx.toLocaleString()} of ${totalRows.toLocaleString()}`);
 
-          const chunkRows = normalizeSlice(rawMatrix, startIdx, endIdx, maxCols);
+          const sliceLen = endIdx - startIdx;
+          const chunkRows = new Array(sliceLen);
+          for (let r = 0; r < sliceLen; r++) {
+            const src = rawMatrix[startIdx + r] || [];
+            const row = new Array(maxCols);
+            for (let c = 0; c < maxCols; c++) {
+              const v = src[c];
+              row[c] = (v === null || v === undefined) ? "" : String(v);
+            }
+            chunkRows[r] = row;
+          }
 
-          await sendChunk({
-            rows: chunkRows,
-            startRow: startIdx + 1,
-            maxCols: maxCols,
-            isFirstChunk: i === 0,
-            isLastChunk: batchNum === totalChunks
-          });
+          const range = `${session.sheetName}!A${startRow}:${endCol}${endIdx}`;
+          await putToSheetsApi(session.sheetId, range, session.token, chunkRows);
 
           const elapsed = (performance.now() - syncStart) / 1000;
           const rate = endIdx / elapsed;
           const rem = Math.ceil((totalRows - endIdx) / rate);
-          etaText.innerText = rem > 0 ? `~${rem}s left` : "";
+          etaText.innerText = rem > 0 ? `~${rem}s left (${Math.round(rate).toLocaleString()} rows/s)` : "";
         }
 
         setProgress(100, "Complete");
@@ -219,41 +281,32 @@
       }
     }
 
-    function sendChunk(payload) {
-      if (window.google && google.script && google.script.run) {
-        return new Promise((resolve, reject) => {
-          google.script.run
-            .withSuccessHandler(res => res && res.success ? resolve() : reject(new Error(res ? res.message : "Script error")))
-            .withFailureHandler(err => reject(new Error(err.message)))
-            .writeChunk(payload);
-        });
-      }
+    async function putToSheetsApi(sheetId, range, token, values) {
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          abortController = new AbortController();
+          const res = await fetch(url, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ majorDimension: 'ROWS', values: values }),
+            signal: abortController.signal
+          });
 
-      return (async () => {
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            abortController = new AbortController();
-            const res = await fetch(WEB_APP_URL, {
-              method: 'POST',
-              redirect: 'follow',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify(payload),
-              signal: abortController.signal
-            });
-
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const result = await res.json();
-            if (!result.success) throw new Error(result.message);
-            return;
-          } catch (err) {
-            if (isCancelled) throw err;
-            if (attempt === 3) {
-              throw new Error(`Row ${payload.startRow} failed (${err.message}). Redeploy Apps Script with 'Who has access: Anyone' or open via Apps Script URL.`);
-            }
-            await new Promise(r => setTimeout(r, 1000 * attempt));
+          if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(errJson.error ? errJson.error.message : `HTTP ${res.status}`);
           }
+          return;
+        } catch (err) {
+          if (isCancelled) throw err;
+          if (attempt === 3) throw new Error(`Sheets API failed at ${range}: ${err.message}`);
+          await new Promise(r => setTimeout(r, 1000 * attempt));
         }
-      })();
+      }
     }
 
     function showSuccess(msg) {
