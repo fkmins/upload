@@ -3,176 +3,90 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>High-Speed Data Sync Engine</title>
+  <title>Data Uploader</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  
   <style>
-    body {
-      background: radial-gradient(circle at top left, #eef2ff, #f8fafc 50%, #e0f2fe);
-    }
-    .glass-card {
-      background: rgba(255, 255, 255, 0.9);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.7);
-      box-shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.12);
+    body { background: #f1f5f9; }
+    .card {
+      background: #ffffff;
+      box-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.08);
     }
     .drop-active {
-      border-color: #3b82f6 !important;
+      border-color: #2563eb !important;
       background-color: #eff6ff !important;
-      transform: scale(1.01);
     }
-    /* Animated Shimmer on Progress Bar */
     @keyframes shimmer {
       0% { background-position: -200% 0; }
       100% { background-position: 200% 0; }
     }
-    .progress-bar-animated {
+    .bar-fill {
       background: linear-gradient(90deg, #2563eb 0%, #60a5fa 50%, #2563eb 100%);
       background-size: 200% 100%;
-      animation: shimmer 2s infinite linear;
-      transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      animation: shimmer 1.5s infinite linear;
+      transition: width 0.3s ease;
     }
   </style>
 </head>
-<body class="min-h-screen flex items-center justify-center p-4 text-slate-800 antialiased">
+<body class="min-h-screen flex items-center justify-center p-4 text-slate-800">
 
-  <div class="glass-card w-full max-w-xl rounded-3xl p-8 transition-all duration-300">
+  <div class="card w-full max-w-lg rounded-2xl p-6 border border-slate-200">
     
-    <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <h1 class="text-xl font-bold text-slate-900 tracking-tight">Cloud Sheet Sync</h1>
-        <p class="text-xs text-slate-500 mt-0.5">High-volume chunked uploader for CSV &amp; Excel</p>
-      </div>
-      <div class="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full">
-        <label for="chunkSizeSelect" class="text-xs font-medium text-slate-600">Batch size:</label>
-        <select id="chunkSizeSelect" class="bg-transparent text-xs font-bold text-blue-600 focus:outline-none cursor-pointer">
-          <option value="5000">5,000 rows</option>
-          <option value="8000" selected>8,000 rows</option>
-          <option value="12000">12,000 rows</option>
-        </select>
-      </div>
+    <div class="flex items-center justify-between mb-4">
+      <span class="text-sm font-bold text-slate-800">Data Sync</span>
+      <select id="chunkSizeSelect" class="bg-slate-100 px-3 py-1 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer">
+        <option value="15000" selected>15,000 rows / batch</option>
+        <option value="20000">20,000 rows / batch</option>
+        <option value="30000">30,000 rows / batch</option>
+      </select>
     </div>
 
-    <!-- STATE 1: Drag & Drop Zone -->
-    <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-10 text-center cursor-pointer bg-slate-50/70 hover:bg-blue-50/40 transition-all duration-200 group">
+    <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-10 text-center cursor-pointer bg-slate-50 transition-all">
       <input type="file" id="fileInput" class="hidden" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" />
-      
-      <div class="flex flex-col items-center">
-        <div class="w-16 h-16 rounded-2xl bg-blue-100/80 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-200">
-          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-          </svg>
-        </div>
-        <p class="font-semibold text-slate-700 text-base">Click to browse or drag file here</p>
-        <p class="text-xs text-slate-400 mt-1">Supports .CSV and .XLSX (100k+ rows supported)</p>
+      <svg class="w-10 h-10 text-slate-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+      </svg>
+      <p class="text-sm font-medium text-slate-600">Drop CSV or XLSX here</p>
+    </div>
+
+    <div id="processingState" class="hidden flex-col bg-slate-50 border border-slate-200 rounded-xl p-5">
+      <div class="flex items-center justify-between mb-3">
+        <span id="fileNameDisplay" class="text-xs font-bold text-slate-700 truncate max-w-[70%]"></span>
+        <button onclick="cancelUpload()" class="text-xs font-semibold text-red-600 hover:underline">Cancel</button>
+      </div>
+
+      <div class="flex justify-between items-end mb-1.5">
+        <span id="rowCounterText" class="text-xs font-medium text-slate-600"></span>
+        <span id="percentText" class="text-lg font-extrabold text-blue-600">0%</span>
+      </div>
+
+      <div class="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+        <div id="progressBar" class="bar-fill h-full rounded-full" style="width: 0%"></div>
+      </div>
+
+      <div class="mt-3 flex justify-between text-[11px] text-slate-500 font-medium">
+        <span id="batchCounterText"></span>
+        <span id="etaText"></span>
       </div>
     </div>
 
-    <!-- STATE 2: Processing & Animated Progress Telemetry -->
-    <div id="processingState" class="hidden flex-col bg-slate-50 border border-slate-200/80 rounded-2xl p-6">
-      
-      <!-- File Metadata Header -->
-      <div class="flex items-center justify-between pb-4 mb-4 border-b border-slate-200">
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
-            DATA
-          </div>
-          <div class="truncate">
-            <p id="fileNameDisplay" class="text-sm font-bold text-slate-800 truncate">dataset.xlsx</p>
-            <p id="fileMetaDisplay" class="text-xs text-slate-500">Calculating dimensions...</p>
-          </div>
-        </div>
-        <button id="cancelBtn" onclick="cancelUpload()" class="text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors">
-          Cancel
-        </button>
-      </div>
-
-      <!-- Step Indicators -->
-      <div class="grid grid-cols-3 gap-2 mb-5 text-center">
-        <div id="stepRead" class="p-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold">
-          1. Read Stream
-        </div>
-        <div id="stepParse" class="p-2 rounded-lg bg-slate-100 text-slate-400 text-xs font-semibold">
-          2. Normalize
-        </div>
-        <div id="stepSync" class="p-2 rounded-lg bg-slate-100 text-slate-400 text-xs font-semibold">
-          3. Cloud Sync
-        </div>
-      </div>
-
-      <!-- Progress Bar & Percentage -->
-      <div class="mb-2 flex justify-between items-end">
-        <div>
-          <span id="processStageText" class="text-xs font-semibold text-blue-600 uppercase tracking-wider">Reading File...</span>
-          <p id="rowCounterText" class="text-sm font-bold text-slate-700 mt-0.5">Preparing rows...</p>
-        </div>
-        <span id="percentText" class="text-2xl font-black text-blue-600">0%</span>
-      </div>
-
-      <div class="w-full h-3.5 bg-slate-200 rounded-full overflow-hidden p-0.5">
-        <div id="progressBar" class="progress-bar-animated h-full rounded-full" style="width: 2%"></div>
-      </div>
-
-      <!-- Live Telemetry Footer -->
-      <div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-500">
-        <span id="batchCounterText">Batch: -- / --</span>
-        <span id="speedText">Speed: -- rows/s</span>
-        <span id="etaText">ETA: --</span>
-      </div>
+    <div id="successState" class="hidden flex-col items-center justify-center bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center">
+      <svg class="w-10 h-10 text-emerald-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+      </svg>
+      <p id="successDetail" class="text-sm font-bold text-emerald-800"></p>
+      <button onclick="resetUI()" class="mt-4 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg">Upload Another</button>
     </div>
 
-    <!-- STATE 3: Success State -->
-    <div id="successState" class="hidden flex-col items-center justify-center bg-emerald-50/70 border border-emerald-200 rounded-2xl p-8 text-center">
-      <div class="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
-        <svg class="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
-        </svg>
-      </div>
-      <h2 class="text-lg font-bold text-emerald-900">Sync Complete!</h2>
-      <p id="successDetail" class="text-xs text-emerald-700 mt-1 max-w-md"></p>
-      
-      <div id="statsSummary" class="mt-4 grid grid-cols-3 gap-3 w-full max-w-sm bg-white p-3 rounded-xl border border-emerald-100 text-center">
-        <div>
-          <p class="text-[10px] uppercase text-slate-400 font-bold">Total Rows</p>
-          <p id="statRows" class="text-sm font-extrabold text-slate-800">0</p>
-        </div>
-        <div>
-          <p class="text-[10px] uppercase text-slate-400 font-bold">Columns</p>
-          <p id="statCols" class="text-sm font-extrabold text-slate-800">0</p>
-        </div>
-        <div>
-          <p class="text-[10px] uppercase text-slate-400 font-bold">Time Taken</p>
-          <p id="statTime" class="text-sm font-extrabold text-slate-800">0s</p>
-        </div>
-      </div>
-
-      <button onclick="resetUI()" class="mt-6 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all">
-        Upload Another File
-      </button>
-    </div>
-
-    <!-- Error Alert -->
-    <div id="errorAlert" class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start justify-between">
-      <div class="flex items-start">
-        <svg class="w-5 h-5 text-red-500 mr-2.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-        </svg>
-        <div>
-          <p class="text-xs font-bold text-red-800 uppercase tracking-wide">Sync Interrupted</p>
-          <p id="errorText" class="text-xs text-red-700 mt-0.5 leading-relaxed"></p>
-        </div>
-      </div>
-      <button onclick="resetUI()" class="text-xs font-semibold text-red-700 hover:underline ml-3 flex-shrink-0">Reset</button>
+    <div id="errorAlert" class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between">
+      <p id="errorText" class="text-xs text-red-700 font-medium"></p>
+      <button onclick="resetUI()" class="text-xs font-bold text-red-700 ml-3">Reset</button>
     </div>
 
   </div>
 
   <script>
-    // Replace with your deployed Google Apps Script Web App URL (ending in /exec)
-    const WEB_APP_URL = "YOUR_WEB_APP_URL_HERE";
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzu1TFnZoMDIJo-f2pbNHnGY1DkF8EBuj6tx3dO4ulZSD2GJf-8Otgx3cw0Wgonueve/exec";
 
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
@@ -181,22 +95,16 @@
     const successState = document.getElementById('successState');
     const errorAlert = document.getElementById('errorAlert');
     const errorText = document.getElementById('errorText');
-
-    // Telemetry DOM Elements
     const fileNameDisplay = document.getElementById('fileNameDisplay');
-    const fileMetaDisplay = document.getElementById('fileMetaDisplay');
-    const processStageText = document.getElementById('processStageText');
     const rowCounterText = document.getElementById('rowCounterText');
     const percentText = document.getElementById('percentText');
     const progressBar = document.getElementById('progressBar');
     const batchCounterText = document.getElementById('batchCounterText');
-    const speedText = document.getElementById('speedText');
     const etaText = document.getElementById('etaText');
 
     let abortController = null;
     let isCancelled = false;
 
-    // Drag & Drop Listeners
     dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drop-active'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drop-active'));
@@ -209,216 +117,141 @@
       if (e.target.files.length) handleFile(e.target.files[0]);
     });
 
-    // Yield thread so UI animations stay smooth
-    const nextFrame = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 20)));
+    const nextFrame = () => new Promise(res => requestAnimationFrame(() => setTimeout(res, 15)));
 
-    function setStepStyle(stepEl, status) {
-      if (status === 'active') {
-        stepEl.className = "p-2 rounded-lg bg-blue-600 text-white text-xs font-semibold shadow-sm transition-all";
-      } else if (status === 'done') {
-        stepEl.className = "p-2 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-semibold transition-all";
-      } else {
-        stepEl.className = "p-2 rounded-lg bg-slate-100 text-slate-400 text-xs font-semibold transition-all";
-      }
-    }
-
-    function updateProgressUI(percent, stageLabel, rowText) {
-      const clamped = Math.min(100, Math.max(0, Math.round(percent)));
-      progressBar.style.width = `${clamped}%`;
-      percentText.innerText = `${clamped}%`;
-      if (stageLabel) processStageText.innerText = stageLabel;
-      if (rowText) rowCounterText.innerText = rowText;
+    function setProgress(percent, text) {
+      const p = Math.min(100, Math.max(0, Math.round(percent)));
+      progressBar.style.width = `${p}%`;
+      percentText.innerText = `${p}%`;
+      if (text) rowCounterText.innerText = text;
     }
 
     function cancelUpload() {
       isCancelled = true;
       if (abortController) abortController.abort();
-      showError("Upload cancelled by user.");
+      showError("Cancelled");
     }
 
     async function handleFile(file) {
       isCancelled = false;
       errorAlert.classList.add('hidden');
-      
-      const validTypes = ['.csv', '.xlsx', '.xls'];
-      const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-      if (!validTypes.includes(extension)) {
-        showError("Invalid file format. Please upload a .CSV or .XLSX file.");
+
+      const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      if (!['.csv', '.xlsx', '.xls'].includes(ext)) {
+        showError("Upload a .CSV or .XLSX file.");
         return;
       }
 
-      // Transition UI to Processing State
       dropZone.classList.add('hidden');
       processingState.classList.remove('hidden');
       processingState.classList.add('flex');
-
-      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
       fileNameDisplay.innerText = file.name;
-      fileMetaDisplay.innerText = `${sizeMB} MB • Analyzing structure...`;
-      
-      setStepStyle(document.getElementById('stepRead'), 'active');
-      setStepStyle(document.getElementById('stepParse'), 'pending');
-      setStepStyle(document.getElementById('stepSync'), 'pending');
-      updateProgressUI(3, "Step 1/3: Reading Binary Stream", "Loading file into memory...");
+      batchCounterText.innerText = "";
+      etaText.innerText = "";
 
       const startTime = performance.now();
 
       try {
-        const arrayBuffer = await file.arrayBuffer();
+        setProgress(5, "Reading file...");
+        const buffer = await file.arrayBuffer();
         if (isCancelled) return;
 
-        setStepStyle(document.getElementById('stepRead'), 'done');
-        setStepStyle(document.getElementById('stepParse'), 'active');
-        updateProgressUI(8, "Step 2/3: Parsing Workbook", "Decoding spreadsheet structure (large files take a few seconds)...");
+        setProgress(10, "Parsing rows...");
         await nextFrame();
 
-        // Parse SheetJS workbook
-        const data = new Uint8Array(arrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array', dense: true });
-        const firstSheetName = workbook.SheetNames[0];
-        const rawMatrix = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { header: 1, defval: "" });
+        const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array', dense: true });
+        const rawMatrix = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
 
-        if (!rawMatrix || rawMatrix.length === 0) {
-          throw new Error("The uploaded file contains no rows.");
-        }
-
-        // Fast client-side rectangular normalization (offloads work from Apps Script)
         const totalRows = rawMatrix.length;
+        if (!totalRows) throw new Error("Empty file.");
+
         let maxCols = 0;
         for (let r = 0; r < totalRows; r++) {
           if (rawMatrix[r].length > maxCols) maxCols = rawMatrix[r].length;
         }
 
-        fileMetaDisplay.innerText = `${sizeMB} MB • ${totalRows.toLocaleString()} rows × ${maxCols} cols`;
-        updateProgressUI(14, "Step 2/3: Normalizing Matrix", `Formatting ${totalRows.toLocaleString()} rows for Google Sheets...`);
+        setProgress(15, `Formatting ${totalRows.toLocaleString()} rows...`);
         await nextFrame();
 
-        const normalizedMatrix = new Array(totalRows);
+        const normalized = new Array(totalRows);
         for (let r = 0; r < totalRows; r++) {
           const row = rawMatrix[r];
-          const cleanRow = new Array(maxCols);
+          const clean = new Array(maxCols);
           for (let c = 0; c < maxCols; c++) {
             const val = row[c];
-            cleanRow[c] = (val === null || val === undefined) ? "" : String(val);
+            clean[c] = (val === null || val === undefined) ? "" : String(val);
           }
-          normalizedMatrix[r] = cleanRow;
+          normalized[r] = clean;
         }
 
-        // Begin Chunked Cloud Transmission
-        setStepStyle(document.getElementById('stepParse'), 'done');
-        setStepStyle(document.getElementById('stepSync'), 'active');
+        const chunkSize = Math.max(14000, parseInt(chunkSizeSelect.value, 10) || 15000);
+        const totalChunks = Math.ceil(totalRows / chunkSize);
+        const syncStart = performance.now();
 
-        const CHUNK_SIZE = parseInt(chunkSizeSelect.value, 10) || 8000;
-        const totalChunks = Math.ceil(totalRows / CHUNK_SIZE);
-        const syncStartTime = performance.now();
-
-        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        for (let i = 0; i < totalChunks; i++) {
           if (isCancelled) return;
 
-          const startIdx = chunkIndex * CHUNK_SIZE;
-          const endIdx = Math.min(startIdx + CHUNK_SIZE, totalRows);
-          const chunkRows = normalizedMatrix.slice(startIdx, endIdx);
+          const startIdx = i * chunkSize;
+          const endIdx = Math.min(startIdx + chunkSize, totalRows);
+          const batchNum = i + 1;
 
-          const batchNum = chunkIndex + 1;
-          batchCounterText.innerText = `Batch: ${batchNum} / ${totalChunks}`;
+          batchCounterText.innerText = `Batch ${batchNum}/${totalChunks}`;
+          setProgress(15 + ((i / totalChunks) * 85), `${startIdx + 1} - ${endIdx} of ${totalRows}`);
 
-          // Progress scales from 15% to 98% across chunks
-          const currentProgress = 15 + ((chunkIndex / totalChunks) * 83);
-          updateProgressUI(
-            currentProgress,
-            `Step 3/3: Uploading Batch ${batchNum} of ${totalChunks}`,
-            `Syncing rows ${(startIdx + 1).toLocaleString()} – ${endIdx.toLocaleString()} of ${totalRows.toLocaleString()}`
-          );
-
-          const payload = {
-            rows: chunkRows,
-            startRow: startIdx + 1, // 1-indexed row in Google Sheets
+          await sendChunk({
+            rows: normalized.slice(startIdx, endIdx),
+            startRow: startIdx + 1,
             totalRows: totalRows,
             maxCols: maxCols,
-            isFirstChunk: chunkIndex === 0,
+            isFirstChunk: i === 0,
             isLastChunk: batchNum === totalChunks
-          };
+          });
 
-          // Send chunk with automatic retry (up to 3 attempts)
-          await sendChunkWithRetry(payload, 3);
-
-          // Update Speed & ETA telemetry
-          const elapsedSec = (performance.now() - syncStartTime) / 1000;
-          const rowsPerSec = Math.round(endIdx / elapsedSec);
-          const remainingRows = totalRows - endIdx;
-          const etaSec = rowsPerSec > 0 ? Math.ceil(remainingRows / rowsPerSec) : 0;
-
-          speedText.innerText = `Speed: ${rowsPerSec.toLocaleString()} rows/s`;
-          etaText.innerText = remainingRows > 0 ? `ETA: ~${etaSec}s` : `ETA: Done`;
+          const elapsed = (performance.now() - syncStart) / 1000;
+          const rate = endIdx / elapsed;
+          const rem = Math.ceil((totalRows - endIdx) / rate);
+          etaText.innerText = rem > 0 ? `~${rem}s left` : "";
         }
 
-        setStepStyle(document.getElementById('stepSync'), 'done');
-        updateProgressUI(100, "Complete", `Synced ${totalRows.toLocaleString()} rows!`);
-
-        const totalTimeSec = ((performance.now() - startTime) / 1000).toFixed(1);
-        await nextFrame();
-        showSuccess(totalRows, maxCols, totalTimeSec, totalChunks);
+        setProgress(100, "Done");
+        const totalSec = ((performance.now() - startTime) / 1000).toFixed(1);
+        showSuccess(`${totalRows.toLocaleString()} rows synced in ${totalSec}s`);
 
       } catch (err) {
-        if (!isCancelled) {
-          showError(err.message);
-        }
+        if (!isCancelled) showError(err.message);
       }
     }
 
-    async function sendChunkWithRetry(payload, maxRetries = 3) {
-      let attempt = 0;
-      while (attempt < maxRetries) {
+    async function sendChunk(payload) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           abortController = new AbortController();
-          const response = await fetch(WEB_APP_URL, {
+          const res = await fetch(WEB_APP_URL, {
             method: 'POST',
-            mode: 'cors',
             redirect: 'follow',
-            headers: {
-              'Content-Type': 'text/plain;charset=utf-8'
-            },
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(payload),
             signal: abortController.signal
           });
 
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} (${response.statusText})`);
-          }
-
-          const result = await response.json();
-          if (!result.success) {
-            throw new Error(result.message || "Backend script returned an error.");
-          }
-          return result;
-
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const result = await res.json();
+          if (!result.success) throw new Error(result.message);
+          return;
         } catch (err) {
           if (isCancelled) throw err;
-          attempt++;
-          if (attempt >= maxRetries) {
-            throw new Error(
-              `Batch at row ${payload.startRow} failed after ${maxRetries} attempts (${err.message}). ` +
-              `Ensure your Apps Script Web App is deployed with 'Who has access: Anyone'.`
-            );
-          }
-          // Exponential backoff before retrying (1s, 2s...)
-          processStageText.innerText = `Network hiccup — Retrying batch (Attempt ${attempt + 1}/${maxRetries})...`;
-          await new Promise(res => setTimeout(res, 1000 * attempt));
+          if (attempt === 3) throw new Error(`Batch at row ${payload.startRow} failed (${err.message})`);
+          await new Promise(r => setTimeout(r, 1000 * attempt));
         }
       }
     }
 
-    function showSuccess(totalRows, maxCols, totalTimeSec, totalChunks) {
+    function showSuccess(msg) {
       processingState.classList.add('hidden');
       processingState.classList.remove('flex');
       successState.classList.remove('hidden');
       successState.classList.add('flex');
-
-      document.getElementById('statRows').innerText = totalRows.toLocaleString();
-      document.getElementById('statCols').innerText = maxCols.toLocaleString();
-      document.getElementById('statTime').innerText = `${totalTimeSec}s`;
-      document.getElementById('successDetail').innerText = 
-        `Successfully streamed ${totalRows.toLocaleString()} rows across ${totalChunks} batches without data loss.`;
+      document.getElementById('successDetail').innerText = msg;
       fileInput.value = '';
     }
 
@@ -436,9 +269,6 @@
       successState.classList.remove('flex');
       errorAlert.classList.add('hidden');
       dropZone.classList.remove('hidden');
-      batchCounterText.innerText = "Batch: -- / --";
-      speedText.innerText = "Speed: -- rows/s";
-      etaText.innerText = "ETA: --";
     }
   </script>
 </body>
