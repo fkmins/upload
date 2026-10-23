@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Data Uploader</title>
+  <title>Data Uploader</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- SheetJS for blazingly fast client-side parsing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   
   <style>
@@ -17,11 +16,8 @@
       border: 1px solid rgba(255, 255, 255, 0.4);
       box-shadow: 0 10px 40px -10px rgba(0,0,0,0.1);
     }
-    
-    /* Smooth Transitions */
     .transition-all-ease { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
     
-    /* Pulse Animation for Drop Zone */
     @keyframes subtle-pulse {
       0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
       70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
@@ -29,7 +25,6 @@
     }
     .hover-pulse:hover { animation: subtle-pulse 1.5s infinite; border-color: #3b82f6; }
     
-    /* Loading Spinner */
     .loader {
       border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6;
       border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite;
@@ -40,14 +35,6 @@
 <body class="min-h-screen flex items-center justify-center p-4 text-slate-800 font-sans">
 
   <div class="glass-card w-full max-w-lg rounded-3xl p-8 relative overflow-hidden transition-all-ease">
-    
-    <!-- Header -->
-    <div class="text-center mb-8">
-      <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
-        Smart Sync
-      </h2>
-      <p class="text-sm text-slate-500 mt-1">Upload .CSV or .XLSX to replace "Raw" sheet</p>
-    </div>
 
     <!-- Drag & Drop Zone -->
     <div id="dropZone" class="hover-pulse border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer bg-slate-50 transition-all-ease group relative">
@@ -88,6 +75,9 @@
   </div>
 
   <script>
+    // Replace this with your exact Google Apps Script Deployment URL
+    const WEB_APP_URL = "https://script.google.com/a/macros/flipkart.com/s/AKfycbzu1TFnZoMDIJo-f2pbNHnGY1DkF8EBuj6tx3dO4ulZSD2GJf-8Otgx3cw0Wgonueve/exec";
+
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const defaultState = document.getElementById('defaultState');
@@ -98,7 +88,6 @@
     const errorAlert = document.getElementById('errorAlert');
     const errorText = document.getElementById('errorText');
 
-    // UI Listeners
     dropZone.addEventListener('click', () => { if(processingState.classList.contains('hidden') && successState.classList.contains('hidden')) fileInput.click(); });
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-400', 'bg-blue-50'); });
     dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-400', 'bg-blue-50'); });
@@ -116,7 +105,6 @@
     async function handleFile(file) {
       errorAlert.classList.add('hidden');
       
-      // Basic validation
       const validTypes = ['.csv', '.xlsx'];
       const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
       if (!validTypes.includes(extension)) {
@@ -124,45 +112,46 @@
         return;
       }
 
-      // Enter Processing State
       defaultState.classList.add('hidden');
       processingState.classList.remove('hidden');
       processingState.classList.add('flex');
 
       try {
         processText.innerText = "Extracting binary stream...";
-        await delay(400); // Artificial delay for smooth UX
+        await delay(300); 
         
         const reader = new FileReader();
         reader.onload = async function(e) {
           try {
-            processText.innerText = "AI Validation: Parsing matrix structure...";
-            await delay(500);
+            processText.innerText = "Parsing matrix structure...";
+            await delay(400);
             
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
             const firstSheetName = workbook.SheetNames[0];
             
-            // Convert to JSON array of arrays
             const jsonMatrix = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { header: 1, defval: "" });
             
             if (jsonMatrix.length === 0) throw new Error("The uploaded document is completely empty.");
 
-            processText.innerText = `Establishing secure uplink for ${jsonMatrix.length} rows...`;
+            processText.innerText = `Transmitting ${jsonMatrix.length} rows to backend...`;
             
-            // Transmit to Google Apps Script Backend
-            google.script.run
-              .withSuccessHandler(res => {
-                if (res.success) {
-                  showSuccess(res.message);
-                } else {
-                  showError(res.message);
-                }
-              })
-              .withFailureHandler(err => {
-                showError("Network failure. Could not reach Google servers.");
-              })
-              .processAndUploadData(JSON.stringify(jsonMatrix));
+            // Fetch API replaces google.script.run for external hosting
+            const response = await fetch(WEB_APP_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'text/plain;charset=utf-8' // Bypasses CORS preflight errors
+              },
+              body: JSON.stringify(jsonMatrix)
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+              showSuccess(result.message);
+            } else {
+              showError(result.message);
+            }
 
           } catch (err) {
             showError("Parsing Error: " + err.message);
@@ -201,7 +190,3 @@
   </script>
 </body>
 </html>
-```<ElicitationsGroup message="Here are some ways you can enhance this script further:">
-<Elicitation label="Add a timestamp column automatically" query="Modify the Google Apps Script to automatically append a column with the current timestamp to every uploaded row."/>
-<Elicitation label="Protect the 'Raw' sheet" query="Update the code to lock the 'Raw' sheet so only the script owner can make manual edits."/>
-</ElicitationsGroup>
