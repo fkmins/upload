@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Data Uploader</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- SheetJS for blazingly fast client-side parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  
+  <style>
+    body { background: #f0f4f8; }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: 0 10px 40px -10px rgba(0,0,0,0.1);
+    }
+    
+    /* Smooth Transitions */
+    .transition-all-ease { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+    
+    /* Pulse Animation for Drop Zone */
+    @keyframes subtle-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+      70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    }
+    .hover-pulse:hover { animation: subtle-pulse 1.5s infinite; border-color: #3b82f6; }
+    
+    /* Loading Spinner */
+    .loader {
+      border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6;
+      border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 text-slate-800 font-sans">
+
+  <div class="glass-card w-full max-w-lg rounded-3xl p-8 relative overflow-hidden transition-all-ease">
+    
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
+        Smart Sync
+      </h2>
+      <p class="text-sm text-slate-500 mt-1">Upload .CSV or .XLSX to replace "Raw" sheet</p>
+    </div>
+
+    <!-- Drag & Drop Zone -->
+    <div id="dropZone" class="hover-pulse border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer bg-slate-50 transition-all-ease group relative">
+      <input type="file" id="fileInput" class="hidden" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" />
+      
+      <div id="defaultState" class="flex flex-col items-center">
+        <svg class="w-12 h-12 text-slate-400 group-hover:text-blue-500 transition-colors mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+        </svg>
+        <p class="font-medium text-slate-600">Click or drag file here</p>
+      </div>
+
+      <!-- Processing State -->
+      <div id="processingState" class="hidden flex-col items-center justify-center absolute inset-0 bg-white/90 backdrop-blur-sm rounded-2xl z-10">
+        <div class="loader mb-3"></div>
+        <p id="processText" class="text-sm font-semibold text-blue-600 animate-pulse">Initializing engine...</p>
+      </div>
+      
+      <!-- Success State -->
+      <div id="successState" class="hidden flex-col items-center justify-center absolute inset-0 bg-green-50 rounded-2xl z-10">
+        <svg class="w-14 h-14 text-green-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <p class="font-bold text-green-700">Sync Complete!</p>
+        <p id="successDetail" class="text-xs text-green-600 mt-1"></p>
+        <button onclick="resetUI()" class="mt-4 px-4 py-1.5 bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold rounded-full transition-colors">Upload Another</button>
+      </div>
+    </div>
+
+    <!-- Error Alert -->
+    <div id="errorAlert" class="hidden mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start">
+      <svg class="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+      </svg>
+      <p id="errorText" class="text-sm text-red-700"></p>
+    </div>
+
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const defaultState = document.getElementById('defaultState');
+    const processingState = document.getElementById('processingState');
+    const processText = document.getElementById('processText');
+    const successState = document.getElementById('successState');
+    const successDetail = document.getElementById('successDetail');
+    const errorAlert = document.getElementById('errorAlert');
+    const errorText = document.getElementById('errorText');
+
+    // UI Listeners
+    dropZone.addEventListener('click', () => { if(processingState.classList.contains('hidden') && successState.classList.contains('hidden')) fileInput.click(); });
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-400', 'bg-blue-50'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-400', 'bg-blue-50'); });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+      if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', (e) => {
+      if(e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    const delay = ms => new Promise(res => setTimeout(res, ms));
+
+    async function handleFile(file) {
+      errorAlert.classList.add('hidden');
+      
+      // Basic validation
+      const validTypes = ['.csv', '.xlsx'];
+      const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      if (!validTypes.includes(extension)) {
+        showError("Invalid file type. Please upload a .CSV or .XLSX file.");
+        return;
+      }
+
+      // Enter Processing State
+      defaultState.classList.add('hidden');
+      processingState.classList.remove('hidden');
+      processingState.classList.add('flex');
+
+      try {
+        processText.innerText = "Extracting binary stream...";
+        await delay(400); // Artificial delay for smooth UX
+        
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+          try {
+            processText.innerText = "AI Validation: Parsing matrix structure...";
+            await delay(500);
+            
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            
+            // Convert to JSON array of arrays
+            const jsonMatrix = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { header: 1, defval: "" });
+            
+            if (jsonMatrix.length === 0) throw new Error("The uploaded document is completely empty.");
+
+            processText.innerText = `Establishing secure uplink for ${jsonMatrix.length} rows...`;
+            
+            // Transmit to Google Apps Script Backend
+            google.script.run
+              .withSuccessHandler(res => {
+                if (res.success) {
+                  showSuccess(res.message);
+                } else {
+                  showError(res.message);
+                }
+              })
+              .withFailureHandler(err => {
+                showError("Network failure. Could not reach Google servers.");
+              })
+              .processAndUploadData(JSON.stringify(jsonMatrix));
+
+          } catch (err) {
+            showError("Parsing Error: " + err.message);
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        showError("System Error: " + err.message);
+      }
+    }
+
+    function showSuccess(msg) {
+      processingState.classList.add('hidden');
+      processingState.classList.remove('flex');
+      successState.classList.remove('hidden');
+      successState.classList.add('flex');
+      successDetail.innerText = msg;
+      fileInput.value = '';
+    }
+
+    function showError(msg) {
+      processingState.classList.add('hidden');
+      processingState.classList.remove('flex');
+      defaultState.classList.remove('hidden');
+      errorText.innerText = msg;
+      errorAlert.classList.remove('hidden');
+      fileInput.value = '';
+    }
+
+    function resetUI() {
+      successState.classList.add('hidden');
+      successState.classList.remove('flex');
+      defaultState.classList.remove('hidden');
+      errorAlert.classList.add('hidden');
+    }
+  </script>
+</body>
+</html>
+```<ElicitationsGroup message="Here are some ways you can enhance this script further:">
+<Elicitation label="Add a timestamp column automatically" query="Modify the Google Apps Script to automatically append a column with the current timestamp to every uploaded row."/>
+<Elicitation label="Protect the 'Raw' sheet" query="Update the code to lock the 'Raw' sheet so only the script owner can make manual edits."/>
+</ElicitationsGroup>
