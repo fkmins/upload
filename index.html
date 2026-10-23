@@ -70,7 +70,7 @@
     </div>
 
     <div id="errorAlert" class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between">
-      <p id="errorText" class="text-xs text-red-700 font-medium break-words max-w-[80%]"></p>
+      <p id="errorText" class="text-xs text-red-700 font-medium break-words max-w-[82%]"></p>
       <button onclick="resetUI()" class="text-xs font-bold text-red-700 ml-2">Reset</button>
     </div>
 
@@ -122,6 +122,21 @@
       showError("Cancelled");
     }
 
+    function normalizeSlice(rawMatrix, startIdx, endIdx, maxCols) {
+      const sliceLen = endIdx - startIdx;
+      const chunk = new Array(sliceLen);
+      for (let i = 0; i < sliceLen; i++) {
+        const row = rawMatrix[startIdx + i] || [];
+        const clean = new Array(maxCols);
+        for (let c = 0; c < maxCols; c++) {
+          const val = row[c];
+          clean[c] = (val === null || val === undefined) ? "" : String(val);
+        }
+        chunk[i] = clean;
+      }
+      return chunk;
+    }
+
     async function handleFile(file) {
       isCancelled = false;
       errorAlert.classList.add('hidden');
@@ -157,24 +172,15 @@
 
         let maxCols = 1;
         for (let r = 0; r < totalRows; r++) {
-          if (rawMatrix[r].length > maxCols) maxCols = rawMatrix[r].length;
+          if (rawMatrix[r] && rawMatrix[r].length > maxCols) maxCols = rawMatrix[r].length;
         }
 
-        setProgress(15, `Preparing ${totalRows.toLocaleString()} rows...`);
-        await nextFrame();
-
-        const normalized = new Array(totalRows);
-        for (let r = 0; r < totalRows; r++) {
-          const row = rawMatrix[r];
-          const clean = new Array(maxCols);
-          for (let c = 0; c < maxCols; c++) {
-            const val = row[c];
-            clean[c] = (val === null || val === undefined) ? "" : String(val);
-          }
-          normalized[r] = clean;
+        const totalCells = totalRows * maxCols;
+        if (totalCells > 10000000) {
+          throw new Error(`File has ${totalCells.toLocaleString()} cells (${totalRows.toLocaleString()} rows × ${maxCols} cols). Google Sheets max limit is 10,000,000 cells.`);
         }
 
-        const chunkSize = Math.max(500, Math.min(4000, Math.floor(40000 / maxCols)));
+        const chunkSize = Math.max(500, Math.min(5000, Math.floor(45000 / maxCols)));
         const totalChunks = Math.ceil(totalRows / chunkSize);
         const syncStart = performance.now();
 
@@ -186,12 +192,13 @@
           const batchNum = i + 1;
 
           batchCounterText.innerText = `Part ${batchNum}/${totalChunks}`;
-          setProgress(15 + ((i / totalChunks) * 85), `${(startIdx + 1).toLocaleString()} – ${endIdx.toLocaleString()} of ${totalRows.toLocaleString()}`);
+          setProgress(12 + ((i / totalChunks) * 88), `${(startIdx + 1).toLocaleString()} – ${endIdx.toLocaleString()} of ${totalRows.toLocaleString()}`);
+
+          const chunkRows = normalizeSlice(rawMatrix, startIdx, endIdx, maxCols);
 
           await sendChunk({
-            rows: normalized.slice(startIdx, endIdx),
+            rows: chunkRows,
             startRow: startIdx + 1,
-            totalRows: totalRows,
             maxCols: maxCols,
             isFirstChunk: i === 0,
             isLastChunk: batchNum === totalChunks
@@ -212,28 +219,41 @@
       }
     }
 
-    async function sendChunk(payload) {
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          abortController = new AbortController();
-          const res = await fetch(WEB_APP_URL, {
-            method: 'POST',
-            redirect: 'follow',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(payload),
-            signal: abortController.signal
-          });
-
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const result = await res.json();
-          if (!result.success) throw new Error(result.message);
-          return;
-        } catch (err) {
-          if (isCancelled) throw err;
-          if (attempt === 3) throw new Error(`Row ${payload.startRow} failed (${err.message})`);
-          await new Promise(r => setTimeout(r, 1000 * attempt));
-        }
+    function sendChunk(payload) {
+      if (window.google && google.script && google.script.run) {
+        return new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(res => res && res.success ? resolve() : reject(new Error(res ? res.message : "Script error")))
+            .withFailureHandler(err => reject(new Error(err.message)))
+            .writeChunk(payload);
+        });
       }
+
+      return (async () => {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            abortController = new AbortController();
+            const res = await fetch(WEB_APP_URL, {
+              method: 'POST',
+              redirect: 'follow',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(payload),
+              signal: abortController.signal
+            });
+
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const result = await res.json();
+            if (!result.success) throw new Error(result.message);
+            return;
+          } catch (err) {
+            if (isCancelled) throw err;
+            if (attempt === 3) {
+              throw new Error(`Row ${payload.startRow} failed (${err.message}). Redeploy Apps Script with 'Who has access: Anyone' or open via Apps Script URL.`);
+            }
+            await new Promise(r => setTimeout(r, 1000 * attempt));
+          }
+        }
+      })();
     }
 
     function showSuccess(msg) {
